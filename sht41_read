@@ -1,0 +1,33 @@
+#!/bin/sh
+
+DEV_DIR=$(find /sys/bus/iio/devices/ -name "iio:device*" -exec grep -q "sht41" {}/name \; -print -quit)
+
+if [ -z "$DEV_DIR" ]; then
+    echo "ERROR: SHT41 IIO device not found! Is the module loaded?"
+    exit 1
+fi
+
+echo "=================================================="
+echo "SHT41 DIAGNOSTIC SCRIPT (IIO Interface)"
+echo "Device Directory: $DEV_DIR"
+echo "=================================================="
+
+raw_temp=$(cat "$DEV_DIR/in_temp_raw")
+scale_temp=$(cat "$DEV_DIR/in_temp_scale")
+offset_temp=$(cat "$DEV_DIR/in_temp_offset")
+
+raw_humid=$(cat "$DEV_DIR/in_humidityrelative_raw")
+scale_humid=$(cat "$DEV_DIR/in_humidityrelative_scale")
+offset_humid=$(cat "$DEV_DIR/in_humidityrelative_offset")
+
+
+real_temp=$(awk -v r="$raw_temp" -v s="$scale_temp" -v o="$offset_temp" 'BEGIN {print ((r + o) * s) / 1000}')
+real_humid=$(awk -v r="$raw_humid" -v s="$scale_humid" -v o="$offset_humid" 'BEGIN {print ((r + o) * s) / 1000}')
+
+echo -e "TEMPERATURE:"
+echo -e "  -> Raw Int:  $raw_temp"
+echo -e "  -> Readable:  $real_temp °C\n"
+echo -e "RELATIVE HUMIDITY:"
+echo -e "  -> Raw Int:  $raw_humid"
+echo -e "  -> Readable:  $real_humid %RH"
+echo "=================================================="

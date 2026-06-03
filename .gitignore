@@ -1,0 +1,14 @@
+
+# Ignore the final loadable kernel module binary
+*.ko
+# Ignore intermediate object and metadata compilation files
+*.o
+*.mod
+*.mod.c
+*.mod.o
+*.order
+*.symvers
+.*.cmd
+.tmp_versions/
+
+*.bak
