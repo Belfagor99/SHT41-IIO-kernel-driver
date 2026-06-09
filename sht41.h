@@ -92,7 +92,6 @@
 
 
 /** I2C glitch protection is offered in form of 8-bit checksum
- *
  * CRC8 Parameters:
  */
 #define CRC8_POLYNOMIAL 0x31

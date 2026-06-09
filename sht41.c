@@ -168,7 +168,14 @@ static int sht41_get_precision(struct iio_dev *indio_dev, const struct iio_chan_
 
 
 	
-
+/**
+ * Sets the heater power mode of the SHT41 sensor based on user input from sysfs attributes.
+ * @param dev: Device structure
+ * @param attr: Device attribute structure (not used in this function but required by the sysfs store function signature)
+ * @param buf: The string input from the user representing the desired heater power mode (e.g., "200mW", "110mW", "20mW")
+ * @param len: The length of the input string
+ * @return: The number of bytes consumed from the input buffer on success, negative error code on failure
+ */
 static ssize_t heater_power_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t len){
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct sht41_data *data = iio_priv(indio_dev);
@@ -186,7 +193,13 @@ static ssize_t heater_power_store (struct device *dev, struct device_attribute *
 	return -EINVAL;
 }
 
-
+/**
+ * Shows the current heater power mode of the SHT41 sensor to the user through sysfs attributes.
+ * @param dev: Device structure
+ * @param attr: Device attribute structure (not used in this function but required by the sysfs show function signature)
+ * @param buf: The buffer to store the output string
+ * @return: The number of bytes written to the buffer on success, negative error code on failure
+ */
 static ssize_t heater_power_show (struct device *dev, struct device_attribute *attr, char *buf){
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct sht41_data *data = iio_priv(indio_dev);
@@ -200,10 +213,28 @@ static ssize_t heater_power_show (struct device *dev, struct device_attribute *a
 }
 
 
+/**
+ * Shows the available heater power modes of the SHT41 sensor to the user through sysfs attributes. 
+ * This is a ReadOnly attribute that simply lists the supported modes.
+ * @param dev: Device structure
+ * @param attr: Device attribute structure (not used in this function but required by the sysfs show function signature)
+ * @param buf: The buffer to store the output string
+ * @return: The number of bytes written to the buffer on success, negative error code on failure
+ */
 static ssize_t heater_power_available_show (struct device *dev, struct device_attribute *attr, char *buf){
 	return sysfs_emit(buf, "200mW 110mW 20mW\n");
 }
 
+
+/**
+ * Sets the heater duration mode of the SHT41 sensor based on user input from sysfs attributes. 
+ * This works in conjunction with the heater power mode to determine the command sent to the sensor when the heater is enabled.
+ * @param dev: Device structure
+ * @param attr: Device attribute structure (not used in this function but required by the sysfs store function signature)
+ * @param buf: The string input from the user representing the desired heater duration mode (e.g., "1s", "0.1s")
+ * @param len: The length of the input string
+ * @return: The number of bytes consumed from the input buffer on success, negative error code on failure
+ */
 static ssize_t heater_duration_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t len){
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct sht41_data *data = iio_priv(indio_dev);
@@ -222,6 +253,13 @@ static ssize_t heater_duration_store (struct device *dev, struct device_attribut
 }
 
 
+/**
+ * Shows the current heater duration mode of the SHT41 sensor to the user through sysfs attributes.
+ * @param dev: Device structure
+ * @param attr: Device attribute structure (not used in this function but required by the sysfs show function signature)
+ * @param buf: The buffer to store the output string
+ * @return: The number of bytes written to the buffer on success, negative error code on failure
+ */
 static ssize_t heater_duration_show (struct device *dev, struct device_attribute *attr, char *buf){
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct sht41_data *data = iio_priv(indio_dev);
@@ -235,11 +273,30 @@ static ssize_t heater_duration_show (struct device *dev, struct device_attribute
 }
 
 
+/**
+ * Shows the available heater duration modes of the SHT41 sensor to the user through sysfs attributes.
+ * This is a ReadOnly attribute that simply lists the supported modes.
+ * @param dev: Device structure
+ * @param attr: Device attribute structure (not used in this function but required by the sysfs show function signature)
+ * @param buf: The buffer to store the output string
+ * @return: The number of bytes written to the buffer on success, negative error code on failure
+ */
 static ssize_t heater_duration_available_show (struct device *dev, struct device_attribute *attr, char *buf){
 	return sysfs_emit(buf, "1s 0.1s\n");
 }
 
 
+/**
+ * Enables the heater on the SHT41 sensor based on user input from sysfs attributes. 
+ * When the user writes "1" or "true" to the heater_enable attribute, this function sends the appropriate command to the sensor to turn on 
+ * the heater with the currently selected power and duration settings. 
+ * It also waits for the heater cycle to complete based on the selected duration to ensure proper operation.
+ * @param dev: Device structure
+ * @param attr: Device attribute structure (not used in this function but required by the sysfs store function signature)
+ * @param buf: The string input from the user representing the command to enable the heater (e.g., "1", "true" to enable)
+ * @param len: The length of the input string
+ * @return: The number of bytes consumed from the input buffer on success, negative error code on failure
+ */
 static ssize_t heater_enable_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t len) {
 
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
@@ -285,6 +342,15 @@ static ssize_t heater_enable_store(struct device *dev, struct device_attribute *
 	return len;
 }
 
+
+/**
+ * Shows the serial number of the SHT41 sensor to the user through sysfs attributes. 
+ * This is a ReadOnly attribute that simply returns the serial number read during driver initialization.
+ * @param dev: Device structure
+ * @param attr: Device attribute structure (not used in this function but required by the sysfs show function signature)
+ * @param buf: The buffer to store the output string
+ * @return: The number of bytes written to the buffer on success, negative error code on failure
+ */
 static ssize_t serial_number_show (struct device *dev, struct device_attribute *attr, char *buf){
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
     struct sht41_data *data = iio_priv(indio_dev);
@@ -292,12 +358,23 @@ static ssize_t serial_number_show (struct device *dev, struct device_attribute *
     return sysfs_emit(buf, "0x%08x\n", data->serial_number);
 }
 
+
+/**
+ * Triggers a soft reset on the SHT41 sensor when the user writes "1" or "true" to the soft_reset sysfs attribute.
+ * This function sends the soft reset command to the sensor, waits for the reset to complete, and logs the action.
+ * @dev: Device structure
+ * @param attr: Device attribute structure (not used in this function but required by the sysfs store function signature)
+ * @param buf: The string input from the user representing the command to trigger a soft reset (e.g., "1", "true" to trigger)
+ * @param len: The length of the input string
+ * @return: The number of bytes consumed from the input buffer on success, negative error code on failure
+ */
 static ssize_t soft_reset_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t len){
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct sht41_data *data = iio_priv(indio_dev);
 	bool trigger_reset;
 	u8 cmd = CMD_SOFT_RESET;
 	int ret;
+
 
 	ret = kstrtobool(buf, &trigger_reset);
 	if (ret){
@@ -329,7 +406,10 @@ static ssize_t soft_reset_store(struct device *dev, struct device_attribute *att
 
 
 
-
+/**
+ * Defines the sysfs attributes for the SHT41 sensor.
+ * Each attribute is associated with its corresponding show and store functions defined above.
+ */
 static DEVICE_ATTR_RW(heater_power);
 static DEVICE_ATTR_RO(heater_power_available);
 static DEVICE_ATTR_RW(heater_duration);
@@ -338,6 +418,11 @@ static DEVICE_ATTR_WO(heater_enable);
 static DEVICE_ATTR_RO(serial_number);
 static DEVICE_ATTR_WO(soft_reset);
 
+
+/**
+ * Groups the defined sysfs attributes into an attribute group for the SHT41 sensor.
+ * This group is used during driver initialization to create the sysfs entries for the sensor.
+ */
 static struct attribute *sht41_attributes[] = {
     &dev_attr_heater_power.attr,
     &dev_attr_heater_power_available.attr,
@@ -349,6 +434,10 @@ static struct attribute *sht41_attributes[] = {
     NULL
 };
 
+
+/**
+ * Defines the attribute group for the SHT41 sensor.
+ */
 static const struct attribute_group sht41_attribute_group = {
     .attrs = sht41_attributes,
 };
@@ -542,12 +631,11 @@ static const struct iio_chan_spec_ext_info sht41_ext_info[] = {
 	IIO_ENUM("precision", IIO_SHARED_BY_ALL, &sht41_precision_enum),
 	{
         .name = "precision_available",
-        .shared = IIO_SHARED_BY_ALL,              /* <-- This stops the channel duplication! */
+        .shared = IIO_SHARED_BY_ALL,              
         .read = iio_enum_available_read,
-        .private = (uintptr_t)&sht41_precision_enum, /* Standard enum pointer mapping */
+        .private = (uintptr_t)&sht41_precision_enum,
     },
-	
-	//IIO_ENUM_AVAILABLE("precision", &sht41_precision_enum),
+
 
 	{}
 };
@@ -578,6 +666,13 @@ static const struct iio_chan_spec sht41_channels[] = {
 		.ext_info = sht41_ext_info,
 	}};
 
+
+/**
+ * IIO info structure for the SHT41 sensor. 
+ * This structure defines the functions that are used to read raw data from the sensor and to access the sysfs attributes.
+ * The IIO core uses this structure to route read and write requests to the correct functions in the driver when userspace interacts 
+ * with the sensor through sysfs attributes or when reading data from the channels.
+ */
 static const struct iio_info sht41_info = {
 	.read_raw = sht41_read_raw,
 	.attrs = &sht41_attribute_group,
@@ -637,7 +732,7 @@ static int sht41_probe(struct i2c_client *client, const struct i2c_device_id *id
 		return -EIO;
 	}
 
-	/* Allocate IIO device with private data for our driver. The IIO core will manage the memory for this device and its private data, \
+	/* Allocate IIO device with private data for our driver. The IIO core will manage the memory for this device and its private data,
 	 * and will automatically free it when the device is removed.
 	 */
 	indio_dev = devm_iio_device_alloc(dev, sizeof(struct sht41_data));
@@ -660,6 +755,7 @@ static int sht41_probe(struct i2c_client *client, const struct i2c_device_id *id
 
 	// populate the CRC8 table using the specified polynomial
 	crc8_populate_msb(sht41_crc8_table, CRC8_POLYNOMIAL);
+
 
 	// Wait for the sensor to be ready after power-up.
 	// This is a safe value that ensures the sensor has completed its internal initialization before we start communicating with it. (by cheat sheet 1ms is enough).
@@ -712,6 +808,7 @@ static int sht41_probe(struct i2c_client *client, const struct i2c_device_id *id
 	return 0;
 }
 
+
 /**
  * Structure for matching the device tree compatible string with the driver.
  * This allows the kernel to automatically load the driver when a device with the compatible string is detected on the I2C bus.
@@ -720,6 +817,7 @@ static const struct i2c_device_id sht41_id[] = {
 	{"sht41", 0},
 	{}};
 MODULE_DEVICE_TABLE(i2c, sht41_id);
+
 
 /**
  * Structure for registering the I2C driver with the kernel.
@@ -736,6 +834,7 @@ static struct i2c_driver sht41_driver = {
 
 module_i2c_driver(sht41_driver);
 
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Christian Lisi");
-MODULE_DESCRIPTION("Linux Kernel Module for SHT41 sensor.");
+MODULE_DESCRIPTION("Linux Kernel IIO Module for SHT41 sensor.");
