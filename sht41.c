@@ -114,7 +114,31 @@ struct sht41_data{
 	u8 mode_precision;
 	u8 heater_power;
 	u8 heater_duration;
+	bool heater_active;
+	bool use_cache;
+    unsigned long cache_jiffies;
 };
+
+
+/**
+ * Checks the CRC of the received data.
+ * @param data: Pointer to the data buffer that was received from the sensor (excluding the CRC byte)
+ * @param len: Length of the data buffer (in bytes)
+ * @param checksum: Expected checksum value that was received from the sensor (the CRC byte)
+ * @return: 0 on success, negative error code on failure
+ */
+static int sht41_check_crc(u8 *data, size_t len, u8 checksum){
+	u8 res;
+
+	res = crc8(sht41_crc8_table, data, len, CRC8_INIT_VALUE);
+	if (res != checksum){
+		pr_err("CRC check failed: calculated 0x%02x, expected 0x%02x\n", res, checksum);
+		return EBADMSG;
+	}
+
+	return 0;
+}
+
 
 /**
  * Sets the precision mode of the SHT41 sensor based on user input from sysfs attributes.
@@ -126,13 +150,11 @@ struct sht41_data{
 static int sht41_set_precision(struct iio_dev *indio_dev, const struct iio_chan_spec *chan, unsigned int val){
 	struct sht41_data *data = iio_priv(indio_dev);
 
-	mutex_lock(&data->lock);
-
-	if (val < 0 || val >= ARRAY_SIZE(sht41_precision_cmds)){
-		mutex_unlock(&data->lock);
+	if (val >= ARRAY_SIZE(sht41_precision_cmds)){
 		return -EINVAL;
 	}
 
+	mutex_lock(&data->lock);
 	data->mode_precision = (u8)val;
 	mutex_unlock(&data->lock);
 
@@ -141,14 +163,6 @@ static int sht41_set_precision(struct iio_dev *indio_dev, const struct iio_chan_
 
 /**
 * Gets the current precision mode of the SHT41 sensor to present it to the user through sysfs attributes.
-* The Logic Flow
-1.  User runs cat precision.
-2.  IIO Core finds your get function.
-3.  IIO Core packs up the indio_dev, any private data, and the chan info.
-4.  The driver (this function) runs, looks at data->mode_precision, and decides the current index is 1.
-5.  The driver writes 1 into *val and returns 0 (success).
-6.  IIO Core sees the 1, finds "medium" in your string array, and shows it to the user.
-  Since mode_precision is a single byte, the read is atomic at the hardware level. However, used the mutex for consistency.
 * @param indio_dev: IIO device structure
 * @param chan: Channel specification (not used in this function but required by the IIO enum get function signature)
 * @return: The current precision mode index (0 for high, 1 for medium, 2 for low) on success, negative error code on failure
@@ -183,7 +197,7 @@ static ssize_t heater_power_store (struct device *dev, struct device_attribute *
 	int i;
 
 	for(i=0; i < ARRAY_SIZE(sht41_heater_power_modes_usr_layer); i++){
-		if (strcmp(buf, sht41_heater_power_modes_usr_layer[i]) == 0){
+		if (sysfs_streq(buf, sht41_heater_power_modes_usr_layer[i]) == 0){
 			mutex_lock(&data->lock);
 			data->heater_power = i;
 			mutex_unlock(&data->lock);
@@ -242,7 +256,7 @@ static ssize_t heater_duration_store (struct device *dev, struct device_attribut
 	int i;
 
 	for(i=0; i < ARRAY_SIZE(sht41_heater_duration_modes_usr_layer); i++){
-		if (strcmp(buf, sht41_heater_duration_modes_usr_layer[i]) == 0){
+		if (sysfs_streq(buf, sht41_heater_duration_modes_usr_layer[i]) == 0){
 			mutex_lock(&data->lock);
 			data->heater_duration = i;
 			mutex_unlock(&data->lock);
@@ -303,41 +317,72 @@ static ssize_t heater_enable_store(struct device *dev, struct device_attribute *
 	struct sht41_data *data = iio_priv(indio_dev);
 	bool trigger_heater;
 	u8 cmd;
+	unsigned int delay;
 	int ret;
+	u8 response[READ_RESPONSE_LENGTH];
 
 	
 	ret = kstrtobool(buf,&trigger_heater);
 	if (ret){
 		return ret;
 	}
-	
-	if(trigger_heater){
-		
-		mutex_lock(&data->lock);
-		cmd = sht41_heater_power_cmds[data->heater_power][data->heater_duration];
-		
-		ret = i2c_master_send(data->client, &cmd, 1);
-		if (ret < 0){
-			mutex_unlock(&data->lock);
-			dev_err(&data->client->dev, "Failed to send heater command: %d\n", ret);
-			return ret;
-		}
-		else if (ret != 1){
-			mutex_unlock(&data->lock);
-			dev_err(&data->client->dev, "Unexpected number of bytes sent for heater command: %d\n", ret);
-			return -EIO;
-		}
 
-
-		// From cheat-sheet -> wait for the heater to complete its cycle based on the selected duration to ensure completion.
-		if(data->heater_duration == HEATER_DURATION_1S){
-			msleep(1100); 
-		}
-		else{
-			msleep(200);
-		}
-		mutex_unlock(&data->lock);
+	if (!trigger_heater){
+		return len;
 	}
+
+	mutex_lock(&data->lock);
+
+	if (data->heater_active){
+		mutex_unlock(&data->lock);
+		return -EBUSY;
+	}
+
+
+	cmd = sht41_heater_power_cmds[data->heater_power][data->heater_duration];
+	delay = (data->heater_duration == HEATER_DURATION_1S) ? 1100 : 200; 
+	data->heater_active = true;
+	ret = i2c_master_send(data->client, &cmd, 1);
+	mutex_unlock(&data->lock);
+
+	if (ret != 1){
+		mutex_lock(&data->lock);
+        data->heater_active = false;
+        mutex_unlock(&data->lock);
+	
+		dev_err(&data->client->dev, "Failed to sent heater command\n");
+		return ret < 0 ? ret : -EIO;
+	}
+
+
+	msleep(delay);
+
+	mutex_lock(&data->lock);
+
+	// Fetch the automated post-heater high-precision data packet
+    ret = i2c_master_recv(data->client, response, READ_RESPONSE_LENGTH);
+
+	if(ret == READ_RESPONSE_LENGTH){
+		
+		if (!sht41_check_crc(&response[0], 2, response[2]) && !sht41_check_crc(&response[3], 2, response[5])){
+			data->temperature = (response[0] << 8) | response[1];
+			data->humidity = (response[3] << 8) | response[4];
+
+			data->use_cache = true;
+        	data->cache_jiffies = jiffies;
+			data->mode_precision = MODE_HIGH_PRECISION;
+		}else{
+			dev_err(&data->client->dev, "Post heater measurement CRC failed\n");
+		}
+	}else{
+		dev_err(&data->client->dev, "Failed to read post-heater measurement response: %d\n", ret);
+	}
+
+
+
+	data->heater_active = false;
+	mutex_unlock(&data->lock);
+
 
 	return len;
 }
@@ -444,24 +489,6 @@ static const struct attribute_group sht41_attribute_group = {
 
 
 
-/**
- * Checks the CRC of the received data.
- * @param data: Pointer to the data buffer that was received from the sensor (excluding the CRC byte)
- * @param len: Length of the data buffer (in bytes)
- * @param checksum: Expected checksum value that was received from the sensor (the CRC byte)
- * @return: 0 on success, negative error code on failure
- */
-static int sht41_check_crc(u8 *data, size_t len, u8 checksum){
-	u8 res;
-
-	res = crc8(sht41_crc8_table, data, len, CRC8_INIT_VALUE);
-	if (res != checksum){
-		pr_err("CRC check failed: calculated 0x%02x, expected 0x%02x\n", res, checksum);
-		return EBADMSG;
-	}
-
-	return 0;
-}
 
 /**
  * Reads a measurement from the SHT41 sensor, including both temperature and humidity data, and stores it in the driver's private data structure.
@@ -470,13 +497,11 @@ static int sht41_check_crc(u8 *data, size_t len, u8 checksum){
  * @param data: Pointer to the driver's private data structure
  * @return: 0 on success, negative error code on failure
  */
-static int sht41_read_measurement(struct sht41_data *data){
+static int sht41_read_measurement_unlocked(struct sht41_data *data){
 
 	u8 cmd;
 	u8 response[READ_RESPONSE_LENGTH];
 	int ret;
-
-	mutex_lock(&data->lock);
 
 	// Determine the command to send based on the current precision mode.
 	cmd = sht41_precision_cmds[data->mode_precision];
@@ -484,12 +509,10 @@ static int sht41_read_measurement(struct sht41_data *data){
 	// Send the measurement command to the sensor.
 	ret = i2c_master_send(data->client, &cmd, 1);
 	if (ret < 0){
-		mutex_unlock(&data->lock);
 		dev_err(&data->client->dev, "Failed to send measurement command: %d\n", ret);
 		return ret;
 	}
 	else if (ret != 1){
-		mutex_unlock(&data->lock);
 		dev_err(&data->client->dev, "Unexpected number of bytes sent for measurement command: %d\n", ret);
 		return -EIO;
 	}
@@ -506,7 +529,6 @@ static int sht41_read_measurement(struct sht41_data *data){
 	// Read the measurement response from the sensor.
 	ret = i2c_master_recv(data->client, response, READ_RESPONSE_LENGTH);
 	if (ret != READ_RESPONSE_LENGTH){
-		mutex_unlock(&data->lock);
 		dev_err(&data->client->dev, "Failed to read measurement response: %d\n", ret);
 		return (ret < 0) ? ret : -EIO;
 	}
@@ -514,7 +536,6 @@ static int sht41_read_measurement(struct sht41_data *data){
 	// Verify the CRC for both temperature and humidity data.
 	if (sht41_check_crc(&response[0], 2, response[2]) ||
 		sht41_check_crc(&response[3], 2, response[5])){
-		mutex_unlock(&data->lock);
 		dev_err(&data->client->dev, "Measurement CRC failed\n");
 		return -EBADMSG;
 	}
@@ -522,7 +543,6 @@ static int sht41_read_measurement(struct sht41_data *data){
 	// Store the raw temperature and humidity values in the driver's private data structure for later retrieval by the read_raw function.
 	data->temperature = (response[0] << 8) | response[1];
 	data->humidity = (response[3] << 8) | response[4];
-	mutex_unlock(&data->lock);
 
 	return 0;
 }
@@ -543,20 +563,48 @@ static int sht41_read_raw(struct iio_dev *indio_dev, struct iio_chan_spec const 
 
 	switch (mask){
 	case IIO_CHAN_INFO_RAW:
+		mutex_lock(&data->lock);
+
+		if(data->use_cache && time_before(jiffies, data->cache_jiffies + msecs_to_jiffies(2000))){
+			dev_info(&data->client->dev, "Using cached measurement from heated command\n");
+			if(chan->type == IIO_TEMP){
+				*val = (int)data->temperature;
+			}else if(chan->type == IIO_HUMIDITYRELATIVE){
+				*val = (int)data->humidity;
+			}else{
+				mutex_unlock(&data->lock);
+				return -EINVAL;
+			}
+			mutex_unlock(&data->lock);
+			return IIO_VAL_INT;
+		}
+
+		//invalidate cache if its expired (>2 seconds). We are here for a RAW read
+		data->use_cache = false;
+
+		if(data->heater_active){
+			mutex_unlock(&data->lock);
+			return -EBUSY;
+		}
 
 		// Read raw data from the sensor based on the current precision mode.
-		ret = sht41_read_measurement(data);
+		ret = sht41_read_measurement_unlocked(data);
 		if (ret)
+		{
+			mutex_unlock(&data->lock);
 			return ret;
+		}
 
 		if (chan->type == IIO_TEMP){
 			*val = (int)data->temperature;
 		}else if (chan->type == IIO_HUMIDITYRELATIVE){
 			*val = (int)data->humidity;
 		}else{
+			mutex_unlock(&data->lock);
 			return -EINVAL;
 		}
 
+		mutex_unlock(&data->lock);
 		return IIO_VAL_INT;
 
 	case IIO_CHAN_INFO_SCALE:
@@ -820,6 +868,15 @@ MODULE_DEVICE_TABLE(i2c, sht41_id);
 
 
 /**
+ * Structure for matching the device tree compatible string with the driver when using device tree-based platform descriptions.
+ */
+static const struct of_device_id sht41_of_match[] = {
+    { .compatible = "sensirion,sht41" },
+    { }
+};
+MODULE_DEVICE_TABLE(of, sht41_of_match);
+
+/**
  * Structure for registering the I2C driver with the kernel.
  * It specifies the driver's name, owner, probe and remove functions, and the device ID table for matching devices.
  * */
@@ -827,6 +884,7 @@ static struct i2c_driver sht41_driver = {
 	.driver = {
 		.name = "sht41",
 		.owner = THIS_MODULE,
+		.of_match_table = sht41_of_match,
 	},
 	.probe = sht41_probe,
 	.id_table = sht41_id,

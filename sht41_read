@@ -12,6 +12,9 @@ echo "SHT41 DIAGNOSTIC SCRIPT (IIO Interface)"
 echo "Device Directory: $DEV_DIR"
 echo "=================================================="
 
+precision=$(cat "$DEV_DIR/precision")
+
+
 raw_temp=$(cat "$DEV_DIR/in_temp_raw")
 scale_temp=$(cat "$DEV_DIR/in_temp_scale")
 offset_temp=$(cat "$DEV_DIR/in_temp_offset")
@@ -24,6 +27,7 @@ offset_humid=$(cat "$DEV_DIR/in_humidityrelative_offset")
 real_temp=$(awk -v r="$raw_temp" -v s="$scale_temp" -v o="$offset_temp" 'BEGIN {print ((r + o) * s) / 1000}')
 real_humid=$(awk -v r="$raw_humid" -v s="$scale_humid" -v o="$offset_humid" 'BEGIN {print ((r + o) * s) / 1000}')
 
+echo -e "PRECISION: $precision"
 echo -e "TEMPERATURE:"
 echo -e "  -> Raw Int:  $raw_temp"
 echo -e "  -> Readable:  $real_temp °C\n"
